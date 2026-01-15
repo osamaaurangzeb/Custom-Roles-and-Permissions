@@ -1,0 +1,19 @@
+"""
+Test Configuration Template
+Copy this file to test_config.py and update with your credentials
+DO NOT commit test_config.py to version control
+"""
+
+# Admin credentials for testing
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "your_password_here"  # Change this to your actual admin password
+
+# Test user credentials (these will be created by tests)
+EDITOR_USERNAME = "test_editor"
+EDITOR_PASSWORD = "TempPass123!"
+
+USER_USERNAME = "test_user"
+USER_PASSWORD = "TempPass123!"
+
+# API Base URL
+BASE_URL = "http://127.0.0.1:8000"
