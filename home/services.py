@@ -1,7 +1,11 @@
 from typing import Optional
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.html import escape
 from .models import User, Role, Permission, RolePermission, Document, DocumentEditRequest
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AuthorizationService:
@@ -160,11 +164,14 @@ class UserManagementService:
                 username=username,
                 email=email,
                 password=password,
-                first_name=first_name,
-                last_name=last_name,
+                first_name=escape(first_name) if first_name else '',
+                last_name=escape(last_name) if last_name else '',
                 force_password_change=True,  # Must change password on first login
                 role=role
             )
+            
+            # Audit log
+            logger.info(f"User created: {username} with role {role_name} by admin {admin_user.username}")
             
             return user, None
             
@@ -201,8 +208,15 @@ class UserManagementService:
             new_role = Role.objects.get(name=new_role_name)
             
             # Update role
+            old_role = target_user.role.name if target_user.role else 'None'
             target_user.role = new_role
             target_user.save()
+            
+            # Audit log
+            logger.info(
+                f"User role updated: {target_user.username} from {old_role} to {new_role_name} "
+                f"by admin {admin_user.username}"
+            )
             
             return True, None
             
@@ -239,6 +253,9 @@ class UserManagementService:
             # Soft delete - deactivate user
             target_user.is_active = False
             target_user.save()
+            
+            # Audit log
+            logger.info(f"User deactivated: {target_user.username} by admin {admin_user.username}")
             
             return True, None
             
@@ -311,13 +328,21 @@ class DocumentEditService:
             edit_request = DocumentEditRequest.objects.create(
                 document=document,
                 requested_by=editor,
-                new_title=new_title,
-                new_content=new_content,
-                reason=reason,
+                new_title=escape(new_title),
+                new_content=escape(new_content),
+                reason=escape(reason) if reason else '',
                 status=DocumentEditRequest.PENDING
             )
+            
+            # Audit log
+            logger.info(
+                f"Edit request created: Document '{document.title}' (ID: {document_id}) "
+                f"by editor {editor.username}"
+            )
+            
             return edit_request, None
         except Exception as e:
+            logger.error(f"Failed to create edit request: {str(e)}")
             return None, str(e)
     
     @staticmethod
@@ -360,16 +385,29 @@ class DocumentEditService:
                 document.save()
                 
                 edit_request.status = DocumentEditRequest.APPROVED
+                
+                # Audit log
+                logger.info(
+                    f"Edit request approved: Document '{document.title}' (ID: {document.id}) "
+                    f"by admin {admin.username}"
+                )
             else:
                 edit_request.status = DocumentEditRequest.REJECTED
+                
+                # Audit log
+                logger.info(
+                    f"Edit request rejected: Document '{edit_request.document.title}' "
+                    f"(ID: {edit_request.document.id}) by admin {admin.username}"
+                )
             
             edit_request.reviewed_by = admin
-            edit_request.review_comment = review_comment
+            edit_request.review_comment = escape(review_comment) if review_comment else ''
             edit_request.reviewed_at = timezone.now()
             edit_request.save()
             
             return True, None
         except Exception as e:
+            logger.error(f"Failed to review edit request: {str(e)}")
             return False, str(e)
     
     @staticmethod

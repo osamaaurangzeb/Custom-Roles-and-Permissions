@@ -4,6 +4,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.core.cache import cache
+from django.utils.html import escape
+import logging
 
 from .models import User, Document, DocumentEditRequest
 from .serializers import (
@@ -17,6 +22,8 @@ from .permissions import (
     IsAdmin, CanManageUsers
 )
 from .services import AuthorizationService, UserManagementService, DocumentEditService
+
+logger = logging.getLogger(__name__)
 
 
 class AuthViewSet(viewsets.GenericViewSet):
@@ -37,6 +44,7 @@ class AuthViewSet(viewsets.GenericViewSet):
     def login(self, request):
         """
         Login endpoint - returns JWT tokens.
+        Implements account lockout after failed attempts.
         POST /api/auth/login/
         """
         serializer = LoginSerializer(data=request.data)
@@ -45,19 +53,40 @@ class AuthViewSet(viewsets.GenericViewSet):
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
         
+        # Check for account lockout
+        lockout_key = f'account_lockout_{username}'
+        lockout_count = cache.get(lockout_key, 0)
+        
+        if lockout_count >= 5:
+            logger.warning(f"Login attempt on locked account: {username}")
+            return Response(
+                {'error': 'Account temporarily locked due to too many failed attempts. Try again in 15 minutes.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+        
         user = authenticate(username=username, password=password)
         
         if user is None:
+            # Increment failed login counter
+            cache.set(lockout_key, lockout_count + 1, 900)  # 15 minutes
+            logger.warning(f"Failed login attempt for user: {username}")
             return Response(
                 {'error': 'Invalid credentials'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
         if not user.is_active:
+            logger.warning(f"Login attempt on disabled account: {username}")
             return Response(
                 {'error': 'Account is disabled'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Clear lockout on successful login
+        cache.delete(lockout_key)
+        
+        # Log successful login
+        logger.info(f"Successful login for user: {username}")
         
         # Check if user needs to change password
         if user.force_password_change:
@@ -102,7 +131,7 @@ class AuthViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['post'])
     def change_password(self, request):
         """
-        Change password endpoint.
+        Change password endpoint with Django password validation.
         POST /api/auth/change-password/
         """
         serializer = ChangePasswordSerializer(data=request.data)
@@ -119,10 +148,28 @@ class AuthViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Validate new password using Django validators
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
+            return Response(
+                {'error': 'Password does not meet requirements', 'details': list(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Ensure new password is different from old
+        if old_password == new_password:
+            return Response(
+                {'error': 'New password must be different from old password'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Set new password
         user.set_password(new_password)
         user.force_password_change = False
         user.save()
+        
+        logger.info(f"Password changed for user: {user.username}")
         
         return Response({'message': 'Password changed successfully'})
     
@@ -286,8 +333,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """
         Set owner when creating document.
+        Sanitize input to prevent XSS.
         """
-        serializer.save(owner=self.request.user)
+        # Sanitize title and content
+        title = escape(serializer.validated_data.get('title', ''))
+        content = escape(serializer.validated_data.get('content', ''))
+        serializer.save(owner=self.request.user, title=title, content=content)
     
     def list(self, request):
         """

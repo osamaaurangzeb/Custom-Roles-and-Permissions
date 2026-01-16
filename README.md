@@ -30,32 +30,6 @@ python manage.py migrate
 python manage.py init_rbac
 ```
 
-### Environment Variables
-
-Set up required environment variables:
-
-**Windows (CMD):**
-```bash
-set GROQ_API_KEY=your-groq-api-key-here
-```
-
-**Windows (PowerShell):**
-```bash
-$env:GROQ_API_KEY="your-groq-api-key-here"
-```
-
-**macOS/Linux:**
-```bash
-export GROQ_API_KEY=your-groq-api-key-here
-```
-
-Or create a `.env` file in the project root (already in .gitignore):
-```
-GROQ_API_KEY=your-groq-api-key-here
-```
-
-Note: The Groq API key is required for LLM chat functionality. Get your key from https://console.groq.com/
-
 ### Start Server
 
 ```bash
@@ -253,20 +227,79 @@ python test_approval_workflow.py
 
 ### Custom Security Middleware
 1. **ForcePasswordChangeMiddleware** - Enforces password change for new users
+   - Logs blocked access attempts for auditing
+   - Adds X-Password-Change-Required header for API clients
 2. **RateLimitMiddleware** - Prevents brute force attacks
    - Login attempts: 5 per 5 minutes per IP
    - API requests: 100 per minute per IP
+   - Uses cache.incr() to prevent race conditions
+   - Adds Retry-After header in responses
 3. **SecurityHeadersMiddleware** - Adds security headers to all responses
    - X-Content-Type-Options
    - X-Frame-Options
    - X-XSS-Protection
    - Strict-Transport-Security
-   - Content-Security-Policy
+   - Content-Security-Policy (configurable in settings)
    - Referrer-Policy
    - Permissions-Policy
 4. **RequestLoggingMiddleware** - Logs all API requests for auditing
+   - Uses Python logging module (production-ready)
+   - Logs to console and file (logs/security.log)
+   - Tracks IP, user, method, path, status, duration
 5. **ValidateJWTMiddleware** - Additional JWT token validation
-6. **IPWhitelistMiddleware** - Optional IP whitelist for admin access (disabled by default)
+   - Validates token signature and expiration
+   - Integrates with DRF's JWT authentication
+   - Logs invalid token attempts
+6. **IPWhitelistMiddleware** - Optional IP whitelist for admin access
+   - Supports CIDR notation for IP ranges (e.g., 192.168.1.0/24)
+   - Disabled by default
+   - Handles proxy headers correctly
+
+### Production Considerations
+- Rate limiting uses Django cache - use Redis or Memcached for multi-server deployments
+- Logging writes to logs/security.log - configure log rotation in production
+- CSP policy is configurable via CONTENT_SECURITY_POLICY setting
+- IP whitelist supports both exact IPs and CIDR ranges
+
+## Security Audit Checklist
+
+The following security measures are implemented:
+
+### Authentication & Authorization
+- JWT token-based authentication with short-lived tokens (30 min access, 1 day refresh)
+- Token blacklisting enabled for logout
+- Account lockout after 5 failed login attempts (15 min lockout)
+- Password validation using Django validators (min 10 chars, complexity requirements)
+- Force password change for new users
+- No hardcoded credentials
+
+### Input Validation & Sanitization
+- All user inputs are sanitized using Django's escape() to prevent XSS
+- Input length limits on all fields
+- Username format validation (alphanumeric + @/./+/-/_)
+- Email uniqueness validation
+- Integer ID validation with min_value constraints
+
+### Error Handling
+- Custom exception handler prevents sensitive data leakage
+- Generic error messages in production
+- Detailed logging for debugging (server-side only)
+- Stack traces hidden in production
+
+### Security Headers
+- X-Content-Type-Options: nosniff
+- X-Frame-Options: DENY
+- X-XSS-Protection: 1; mode=block
+- Strict-Transport-Security (HSTS)
+- Content-Security-Policy
+- Referrer-Policy
+- Permissions-Policy
+
+### Production Settings (auto-enabled when DEBUG=False)
+- HTTPS redirect
+- Secure cookies (HttpOnly, Secure, SameSite)
+- HSTS with preload
+- Request body size limits (5MB)
 
 
 ## License
