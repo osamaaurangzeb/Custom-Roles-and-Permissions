@@ -309,7 +309,6 @@ class IPWhitelistMiddleware(MiddlewareMixin):
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
         if x_forwarded_for:
             # Get the first IP in the chain (original client)
-            # In production with trusted proxies, you might want the last trusted IP
             ip = x_forwarded_for.split(',')[0].strip()
         else:
             ip = request.META.get('REMOTE_ADDR')

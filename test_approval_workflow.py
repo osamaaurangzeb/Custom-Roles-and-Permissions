@@ -1,9 +1,3 @@
-"""
-Test Script for Document Edit Approval Workflow
-Tests the complete approval workflow from editor submission to admin review
-
-Note: Update test_config.py with your admin credentials before running
-"""
 import requests
 import json
 import sys

@@ -1,7 +1,3 @@
-"""
-Custom Exception Handler
-Prevents sensitive data leakage in error responses
-"""
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
